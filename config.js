@@ -1,5 +1,9 @@
-// Configuration Firebase du projet « Suivi Réparation » (voir README, étape 2).
-// Remplacez null par l'objet firebaseConfig copié depuis la console Firebase :
-//   window.FIREBASE_CONFIG = { apiKey: "...", authDomain: "...", projectId: "...", storageBucket: "...", messagingSenderId: "...", appId: "..." };
-// Ces valeurs ne sont pas secrètes : l'accès aux données est protégé par la connexion et par firestore.rules.
-window.FIREBASE_CONFIG = null;
+window.FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAE6HuvVL-qrdJ3Rn2AlvOIYHRIr1Ov4mw",
+  authDomain: "autop-reparation.firebaseapp.com",
+  projectId: "autop-reparation",
+  storageBucket: "autop-reparation.firebasestorage.app",
+  messagingSenderId: "631835899423",
+  appId: "1:631835899423:web:107d5e63c2901fe226c72a",
+  measurementId: "G-T02LN7WG1L"
+};
