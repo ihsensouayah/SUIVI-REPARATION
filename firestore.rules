@@ -1,0 +1,14 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Suivi Réparation : seuls les comptes créés dans Firebase (Authentication) lisent et écrivent.
+    // La liste Odoo (suiviReparation/odoo) n'est écrite que par l'agent (compte de service, hors règles).
+    match /suiviReparation/odoo {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+    match /suiviReparation/{doc} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
