@@ -1,0 +1,987 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>:root{color-scheme:light;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script src="config.js"></script>
+<title>Suivi Réparation AUTOP</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+</head>
+<body>
+<style>
+/* Layout: sticky atelier bar → KPI strip → two analysis panels → working table (the place where actions happen) */
+:root{
+  --bg:#eef1f5; --surface:#ffffff; --surface-2:#f6f8fb; --ink:#101a2b; --muted:#5a6678; --line:#dbe1e9;
+  --navy:#16305a; --accent:#1d4f9c; --accent-soft:#e3ecf9; --brand-red:#c8102e;
+  --ok:#1d8048; --ok-soft:#e1f3e8; --warn:#b26a00; --warn-soft:#fbefd9; --crit:#c8102e; --crit-soft:#fbe3e6;
+  --idle:#8a95a6; --idle-soft:#eceff3; --wait:#3d6fb8; --wait-soft:#e2ebf8; --done:#2c5c74; --done-soft:#dfedf3;
+  --plate:#111; --plate-ink:#fff;
+  --f-display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --f-body:"Barlow","Segoe UI",Roboto,Arial,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+  --r:8px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0c121b; --surface:#141c28; --surface-2:#18212f; --ink:#e4e9f1; --muted:#95a2b5; --line:#263347;
+  --navy:#0f1a2b; --accent:#7ea7e6; --accent-soft:#1c2b44; --brand-red:#ff4d63;
+  --ok:#4cc27e; --ok-soft:#15301f; --warn:#f0a83a; --warn-soft:#33260f; --crit:#ff5a6e; --crit-soft:#3a1720;
+  --idle:#7d899b; --idle-soft:#1e2734; --wait:#7ea7e6; --wait-soft:#1c2b44; --done:#73b3cf; --done-soft:#14303b;
+  --plate:#000; --plate-ink:#f3f3f3; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0c121b; --surface:#141c28; --surface-2:#18212f; --ink:#e4e9f1; --muted:#95a2b5; --line:#263347;
+  --navy:#0f1a2b; --accent:#7ea7e6; --accent-soft:#1c2b44; --brand-red:#ff4d63;
+  --ok:#4cc27e; --ok-soft:#15301f; --warn:#f0a83a; --warn-soft:#33260f; --crit:#ff5a6e; --crit-soft:#3a1720;
+  --idle:#7d899b; --idle-soft:#1e2734; --wait:#7ea7e6; --wait-soft:#1c2b44; --done:#73b3cf; --done-soft:#14303b;
+  --plate:#000; --plate-ink:#f3f3f3; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.45}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--navy)}
+.wrap{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));max-width:1500px;margin:0 auto}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+
+/* top bar */
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:9;background:var(--navy);color:#fff}
+.bar .wrap{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding-block:10px}
+.mark{width:34px;height:34px;border-radius:6px;background:var(--brand-red);display:grid;place-items:center;font-family:var(--f-display);font-weight:700;font-size:20px;color:#fff;flex:none}
+.bar h1{font-family:var(--f-display);font-weight:700;font-size:22px;letter-spacing:.02em;margin:0;line-height:1.1;text-transform:uppercase}
+.bar .sub{font-size:12px;color:#b8c6dc}
+.bar .grow{flex:1;min-width:0}
+.bar .acts{display:flex;gap:8px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:6px;padding:7px 12px;font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+:root[data-theme="dark"] .btn.primary{color:#0c121b}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .btn.primary{color:#0c121b}}
+.bar .btn{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.22);color:#fff}
+.bar .btn:hover{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.5)}
+.btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2}
+.formula{font-family:var(--f-mono);font-size:12px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);border-radius:6px;padding:6px 10px;color:#fff;cursor:pointer}
+
+.banner{margin-top:12px;padding:10px 14px;border-radius:var(--r);background:var(--warn-soft);color:var(--warn);font-weight:500;border:1px solid color-mix(in srgb,var(--warn) 30%,transparent)}
+
+/* KPIs */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:16px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.kpi .lbl{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.kpi .val{font-family:var(--f-display);font-weight:700;font-size:32px;line-height:1.05;font-variant-numeric:tabular-nums}
+.kpi .val small{font-size:16px;font-weight:600;color:var(--muted);margin-left:3px}
+.kpi .hint{font-size:12px;color:var(--muted)}
+.kpi.alert .val{color:var(--crit)}
+.meter{height:5px;border-radius:3px;background:var(--idle-soft);overflow:hidden;margin-top:6px}
+.meter i{display:block;height:100%;background:var(--accent);border-radius:3px}
+
+/* panels */
+.panels{display:grid;grid-template-columns:1.25fr 1fr;gap:12px;margin-top:12px}
+@media (max-width:900px){.panels{grid-template-columns:1fr}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;min-width:0}
+.panel h2{font-family:var(--f-display);font-size:17px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin:0;text-wrap:balance}
+.ph{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{border:0;background:transparent;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent)}
+.hbars{display:flex;flex-direction:column;gap:6px}
+.hb{display:grid;grid-template-columns:minmax(0,190px) 1fr 64px;gap:10px;align-items:center;border:0;background:transparent;padding:3px 4px;border-radius:5px;cursor:pointer;text-align:left;width:100%}
+.hb:hover,.hb[aria-pressed="true"]{background:var(--surface-2)}
+.hb .n{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hb .t{height:14px;background:var(--surface-2);border-radius:3px;position:relative;overflow:hidden}
+.hb .t i{position:absolute;inset:0 auto 0 0;background:var(--accent);border-radius:3px}
+.hb .t i.late{background:var(--crit)}
+.hb .v{font-size:12.5px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+.more{margin-top:8px;border:0;background:none;color:var(--accent);font-weight:600;cursor:pointer;padding:2px 4px}
+.stack{display:flex;height:26px;border-radius:5px;overflow:hidden;gap:2px;background:var(--surface-2)}
+.stack button{border:0;padding:0;cursor:pointer;min-width:4px}
+.legend{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px 12px;margin-top:10px}
+.lg{display:flex;align-items:center;gap:8px;border:0;background:transparent;padding:4px 6px;border-radius:5px;cursor:pointer;text-align:left}
+.lg:hover,.lg[aria-pressed="true"]{background:var(--surface-2)}
+.lg i{width:10px;height:10px;border-radius:2px;flex:none}
+.lg span{flex:1;font-size:13px}
+.lg b{font-variant-numeric:tabular-nums;font-size:13px}
+.sublbl{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:16px 0 6px}
+
+/* table area */
+.work{margin-top:12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);margin-bottom:28px;min-width:0}
+.tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)}
+.tools h2{font-family:var(--f-display);font-size:17px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin:0 8px 0 0}
+.search{position:relative;flex:1 1 220px;min-width:0;max-width:340px}
+.search input{width:100%;padding:7px 10px 7px 32px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2)}
+.search svg{position:absolute;left:9px;top:50%;transform:translateY(-50%);width:15px;height:15px;stroke:var(--muted);fill:none;stroke-width:2}
+.tools select{padding:7px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2);max-width:220px;min-width:0}
+.count{margin-left:auto;font-size:12.5px;color:var(--muted)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;padding:0 14px}
+.chips:not(:empty){padding-top:10px}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--accent-soft);color:var(--accent);border:0;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:600;cursor:pointer}
+.tscroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:1180px}
+th{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);background:var(--surface-2);white-space:nowrap;position:sticky;top:0}
+th button{all:unset;cursor:pointer;display:inline-flex;gap:4px;align-items:center}
+th button:focus-visible{outline:2px solid var(--accent)}
+th .arr{opacity:.35;font-size:10px}
+th.sorted .arr{opacity:1;color:var(--accent)}
+td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+tbody tr:hover td{background:var(--surface-2)}
+tr.late td:first-child{box-shadow:inset 3px 0 0 var(--crit)}
+tr.soon td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
+.r{text-align:right}
+.ds{font-family:var(--f-mono);font-size:12.5px;white-space:nowrap}
+.ds small{display:block;font-family:var(--f-body);font-size:11px;color:var(--muted)}
+.veh b{font-weight:600}
+.veh .mod{color:var(--muted);font-size:12.5px}
+.plate{display:inline-flex;align-items:center;gap:5px;background:var(--plate);color:var(--plate-ink);border-radius:4px;padding:1px 7px;font-family:var(--f-mono);font-size:12px;letter-spacing:.02em;white-space:nowrap;margin-top:3px;border:1px solid #444}
+.plate{direction:ltr;unicode-bidi:isolate}.plate .ar{unicode-bidi:isolate;font-family:"Noto Naskh Arabic","Geeza Pro",Tahoma,sans-serif;font-size:11.5px}
+.plate.rs{background:transparent;color:var(--ink);border:1px dashed var(--muted)}
+.gar{max-width:170px;font-size:12.5px;line-height:1.3}
+.etape{display:inline-block;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:4px;white-space:nowrap}
+.etape.rdv{background:var(--wait-soft);color:var(--wait)}
+.etape.liv{background:var(--idle-soft);color:var(--muted)}
+.etape.rep{background:var(--accent-soft);color:var(--accent)}
+.etape.fin{background:var(--done-soft);color:var(--done)}
+.dsrc{display:block;font-size:10.5px;color:var(--muted);margin-top:2px}
+.in{width:76px;padding:5px 7px;border:1px solid var(--line);border-radius:5px;background:var(--surface);text-align:right;font-variant-numeric:tabular-nums}
+.in.date{width:132px;text-align:left}
+/* ---- affichage (board) ---- */
+.board{padding-block:16px 32px}
+.btop{display:flex;gap:12px;flex-wrap:wrap;align-items:stretch;justify-content:space-between}
+.tiles{display:flex;gap:8px;flex-wrap:wrap}
+.bleft{display:flex;flex-direction:column;gap:10px;min-width:0}
+.bphase{align-self:flex-start;background:var(--surface)}
+.bphase button{padding:7px 14px;font-size:14px}
+.bphase b{font-variant-numeric:tabular-nums;margin-left:4px}
+.tile{border:1px solid var(--line);background:var(--surface);border-radius:var(--r);padding:8px 14px;min-width:118px;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:0;box-shadow:inset 4px 0 0 var(--c)}
+.tile b{font-family:var(--f-display);font-size:30px;line-height:1.05;color:var(--c);font-variant-numeric:tabular-nums}
+.tile span{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.tile[aria-pressed="true"]{background:var(--surface-2);outline:2px solid var(--c);outline-offset:-2px}
+.bctl{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.bctl select{padding:7px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2);max-width:220px;min-width:0}
+.bhead,.brow{display:grid;grid-template-columns:150px minmax(170px,1.1fr) minmax(150px,1fr) minmax(280px,1.5fr) minmax(150px,.9fr);gap:16px;align-items:center}
+.bhead{margin-top:16px;padding:0 16px 6px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.blist{display:flex;flex-direction:column;gap:8px}
+.brow{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 16px;min-width:0}
+.brow > *{min-width:0}
+.b-ds{font-family:var(--f-mono);font-size:15px;font-weight:500}
+.b-ds small{display:block;font-family:var(--f-body);font-size:12px;color:var(--muted);font-weight:500}
+.b-veh b{font-family:var(--f-display);font-size:19px;font-weight:600;letter-spacing:.02em}
+.b-veh .mod{color:var(--muted);font-size:14px}
+.b-gar{font-size:14px;line-height:1.3}
+.bst{border-radius:8px;padding:10px 14px;background:var(--s);box-shadow:inset 6px 0 0 var(--c)}
+.bst .lab{font-family:var(--f-display);font-weight:700;font-size:28px;line-height:1;text-transform:uppercase;letter-spacing:.03em;color:var(--c);display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.bst .lab small{font-family:var(--f-body);font-size:13px;font-weight:600;text-transform:none;letter-spacing:0}
+.bst .sub{font-size:13px;color:var(--ink);margin-top:4px;opacity:.85}
+.bst .load{width:100%;margin-top:8px}
+.bst .load-t{height:12px;background:color-mix(in srgb,var(--c) 14%,var(--surface))}
+.bst .load-l{display:none}
+.b-act{font-size:15px;font-weight:600}
+.b-act.none{color:var(--muted);font-weight:400}
+.b-act small{display:block;font-size:12.5px;font-weight:400;color:var(--muted);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.bfoot{margin-top:12px;color:var(--muted);font-size:12.5px}
+@media (max-width:980px){
+  .bhead{display:none}
+  .brow{grid-template-columns:1fr 1fr;gap:10px 14px}
+  .bst{grid-column:1 / -1;order:-1}
+}
+@media (max-width:520px){.brow{grid-template-columns:1fr}.bst .lab{font-size:24px}}
+.hcell{white-space:nowrap}
+.hcell .dtag{display:block;font-size:10.5px;color:var(--muted);margin-top:3px;text-align:right}
+.dtag.warn{color:var(--warn)}
+.dtag.ecart{color:var(--crit);font-weight:600}
+.in.fromdevis::placeholder{color:var(--ink);opacity:.85}
+.in.fromdevis{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 35%,var(--line))}
+.in.empty{border-color:color-mix(in srgb,var(--warn) 60%,var(--line));background:var(--warn-soft)}
+.in:disabled{opacity:.7;background:var(--surface-2)}
+.act{padding:5px 6px;border:1px solid var(--line);border-radius:5px;background:var(--surface);max-width:170px}
+.jours{font-family:var(--f-display);font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
+.jours small{font-family:var(--f-body);font-size:11px;color:var(--muted);font-weight:500;margin-left:2px}
+.fin{white-space:nowrap;font-variant-numeric:tabular-nums}
+.fin small{display:block;color:var(--muted);font-size:11.5px}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;border-radius:20px;padding:2px 9px;white-space:nowrap}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.load{margin-top:6px;width:150px;max-width:100%}
+.load-t{height:9px;border-radius:5px;background:var(--idle-soft);overflow:hidden;position:relative}
+.load-t i{display:block;height:100%;border-radius:5px;background:var(--c);transition:width .6s ease}
+.load.run .load-t i{background-image:linear-gradient(45deg,rgba(255,255,255,.28) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.28) 50%,rgba(255,255,255,.28) 75%,transparent 75%);background-size:14px 14px;animation:stripes .8s linear infinite}
+.load-l{display:block;font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.load-l b{color:var(--c)}
+@keyframes stripes{to{background-position:14px 0}}
+@media (prefers-reduced-motion:reduce){.load.run .load-t i{animation:none}}
+.jours + small + .calc,.calc{display:block;font-size:10.5px;color:var(--muted);font-weight:400;font-family:var(--f-body)}
+.prog{height:4px;background:var(--idle-soft);border-radius:2px;margin-top:5px;overflow:hidden;width:100%;max-width:120px}
+.prog i{display:block;height:100%;border-radius:2px}
+.notebtn{border:1px solid var(--line);background:var(--surface);border-radius:5px;width:30px;height:28px;display:grid;place-items:center;cursor:pointer;position:relative}
+.notebtn svg{width:15px;height:15px;stroke:var(--muted);fill:none;stroke-width:2}
+.notebtn.has svg{stroke:var(--accent)}
+.notebtn.has::after{content:"";position:absolute;top:3px;right:3px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.saving{animation:pulse 1s ease-in-out infinite}
+.saved-flash{animation:flash .9s ease-out}
+@keyframes pulse{50%{opacity:.55}}
+@keyframes flash{0%{box-shadow:0 0 0 2px var(--ok)}100%{box-shadow:0 0 0 0 transparent}}
+@media (prefers-reduced-motion:reduce){.saving,.saved-flash{animation:none}}
+.empty-state{padding:40px 16px;text-align:center;color:var(--muted)}
+.empty-state b{display:block;color:var(--ink);font-size:16px;margin-bottom:4px}
+
+/* modal */
+.modal-bg{position:fixed;inset:0;background:rgba(8,14,24,.55);z-index:20;display:grid;place-items:center;padding:16px}
+.modal{background:var(--surface);border:1px solid var(--line);border-radius:10px;width:min(520px,100%);max-height:90vh;overflow:auto;padding:18px 20px;box-shadow:0 20px 50px rgba(0,0,0,.3)}
+.modal h3{font-family:var(--f-display);font-size:20px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;margin:0 0 4px}
+.modal .meta{color:var(--muted);font-size:12.5px;margin-bottom:14px}
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+.field label{font-size:12px;font-weight:600;color:var(--muted)}
+.field input,.field select,.field textarea{padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2)}
+.field textarea{min-height:110px;resize:vertical}
+.mfoot{display:flex;justify-content:flex-end;gap:8px;margin-top:6px;flex-wrap:wrap}
+.formula-box{font-family:var(--f-mono);background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:10px 12px;font-size:13px;margin-bottom:14px}
+.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:6px;font-weight:600;z-index:30;font-size:13px;max-width:calc(100% - 32px)}
+@media (max-width:560px){.bar h1{font-size:19px}.kpi .val{font-size:27px}.hb{grid-template-columns:minmax(0,120px) 1fr 52px}}
+</style>
+
+<header class="bar">
+  <div class="wrap">
+    <div class="mark" aria-hidden="true">A</div>
+    <div class="grow">
+      <h1>Suivi réparation véhicules</h1>
+      <div class="sub" id="srcInfo">Chargement des dossiers…</div>
+    </div>
+    <button class="formula" id="formulaBtn" title="Modifier la formule de conversion">6 h = 1 j</button>
+    <div class="acts">
+      <button class="btn" id="viewBtn"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="1"/><path d="M8 21h8M12 17v4"/></svg><span>Affichage</span></button>
+      <button class="btn" id="importBtn"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>Importer tableau de suivi</button>
+      <button class="btn" id="logout" hidden title="Se déconnecter"><span id="who"></span> · Déconnexion</button>
+      <button class="btn" id="exportBtn" hidden><svg viewBox="0 0 24 24"><path d="M12 15V3M7 8l5-5 5 5M4 21h16"/></svg>Exporter la vue</button>
+    </div>
+    <input type="file" id="fileIn" accept=".xlsx,.xls" hidden>
+  </div>
+</header>
+
+<main class="wrap" id="mainView">
+  <div id="banner"></div>
+  <section class="kpis" id="kpis" aria-label="Indicateurs"></section>
+
+  <section class="panels">
+    <div class="panel">
+      <div class="ph">
+        <h2>Charge par garage</h2>
+        <div class="seg" role="group" aria-label="Mesure">
+          <button id="mJ" aria-pressed="true">Jours de travail</button>
+          <button id="mD" aria-pressed="false">Dossiers</button>
+        </div>
+      </div>
+      <div class="hbars" id="garBars"></div>
+      <button class="more" id="garMore"></button>
+    </div>
+    <div class="panel">
+      <div class="ph"><h2>Avancement</h2></div>
+      <div class="stack" id="stStack"></div>
+      <div class="legend" id="stLegend"></div>
+      <div class="sublbl">Tâche courante (Odoo)</div>
+      <div class="stack" id="etStack"></div>
+      <div class="legend" id="etLegend"></div>
+    </div>
+  </section>
+
+  <section class="work">
+    <div class="tools">
+      <h2>Dossiers</h2>
+      <div class="search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+        <input id="q" type="search" placeholder="N° dossier, immatriculation, marque, garage…" autocomplete="off">
+      </div>
+      <select id="fPhase" aria-label="Phase"><option value="">Toutes les phases</option><option value="cours">En réparation</option><option value="avant">À commencer</option></select>
+      <select id="fEtape" aria-label="Tâche courante"><option value="">Toutes les tâches</option></select>
+      <select id="fStatut" aria-label="Statut"><option value="">Tous les statuts</option></select>
+      <select id="fAction" aria-label="Action"><option value="">Toutes les actions</option></select>
+      <select id="fGarage" aria-label="Garage"><option value="">Tous les garages</option></select>
+      <select id="fSrc" aria-label="Source des heures"><option value="">Toutes les heures</option></select>
+      <span class="count num" id="count"></span>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="tscroll">
+      <table>
+        <thead><tr id="thead"></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div id="tEmpty"></div>
+  </section>
+</main>
+<section class="wrap board" id="board" hidden aria-label="Affichage des réparations">
+  <div class="btop">
+    <div class="bleft"><div class="seg bphase" id="bPhase" role="group" aria-label="Phase"></div><div class="tiles" id="bTiles"></div></div>
+    <div class="bctl">
+      <div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+        <input id="bq" type="search" placeholder="Dossier, immatriculation, garage…" autocomplete="off"></div>
+      <select id="bGarage" aria-label="Garage"><option value="">Tous les garages</option></select>
+      <button class="btn" id="fsBtn">Plein écran</button>
+    </div>
+  </div>
+  <div class="bhead" aria-hidden="true"><span>Dossier</span><span>Véhicule</span><span>Garage</span><span>Statut</span><span>Action</span></div>
+  <div id="bList" class="blist"></div>
+  <div class="bfoot" id="bFoot"></div>
+</section>
+<div id="modalRoot"></div>
+<div id="toastRoot"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- constants ---------- */
+const ACTIONS = ['Relancer garage','RDV fixé','Attente pièces','Véhicule en atelier','Réparation en cours','Bloqué','Réparation terminée'];
+const DONE_ACTION = 'Réparation terminée';
+const STATUTS = {
+  retard:  {label:'En retard',         c:'--crit', s:'--crit-soft', rank:0},
+  proche:  {label:'Échéance proche',   c:'--warn', s:'--warn-soft', rank:1},
+  cours:   {label:'Dans les délais',   c:'--ok',   s:'--ok-soft',   rank:2},
+  attente: {label:'Non démarré',       c:'--wait', s:'--wait-soft', rank:3},
+  saisir:  {label:'Heures à saisir',   c:'--idle', s:'--idle-soft', rank:4},
+  fini:    {label:'Terminé',           c:'--done', s:'--done-soft', rank:5},
+};
+const COLS = [
+  {k:'ds', l:'Dossier'}, {k:'veh', l:'Véhicule'}, {k:'garage', l:'Garage'}, {k:'etape', l:'Tâche'},
+  {k:'heures', l:'Heures validées', r:1}, {k:'jours', l:'Jours trav.', r:1},
+  {k:'debut', l:'Début répar.'}, {k:'fin', l:'Fin prévue'}, {k:'statut', l:'Statut'}, {k:'action', l:'Action'}, {k:'note', l:'', nosort:1}
+];
+
+/* ---------- state ---------- */
+const S = {
+  rows: [], meta: null, saisies: {}, params: {hpj: 6, semaine: 6}, devis: {}, devisAt: null, debTab: {},
+  f: {q:'', etape:'', statut:'', action:'', garage:'', src:'', phase:''},
+  sort: {k:'statut', d:1}, garMode: 'jours', garAll: false,
+  db: null, user: null, downloads: null, canWrite: true, live: false, loaded: false,
+};
+const pending = new Map();   // key -> promise chain (one write at a time per doc)
+let deferRender = false;
+
+/* ---------- formatting ---------- */
+const nf0 = new Intl.NumberFormat('fr-FR', {maximumFractionDigits: 0});
+const nf1 = new Intl.NumberFormat('fr-FR', {maximumFractionDigits: 1});
+const nf3 = new Intl.NumberFormat('fr-FR', {minimumFractionDigits: 3, maximumFractionDigits: 3});
+const keyOf = ds => String(ds).replace(/[^A-Za-z0-9_.~:@+-]/g, '-');
+const pad = n => String(n).padStart(2, '0');
+const iso = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+const parseIso = s => { if (!s) return null; const [y, m, d] = s.split('-').map(Number); return (y && m && d) ? new Date(y, m - 1, d) : null; };
+const fdate = d => d ? pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear() : '—';
+const fdt = s => { const d = new Date(s); return isNaN(d) ? '—' : fdate(d) + ' ' + pad(d.getHours()) + 'h' + pad(d.getMinutes()); };
+const SRC = {devis: 'Heures du devis Odoo', manuel: 'Saisie = devis / manuelle', ecart: 'Écart saisie ≠ devis', verif: 'Devis à vérifier (forfait, autres lignes)', aucune: 'Aucune heure'};
+function devisTag(x) {
+  if (!x.dv) return '';
+  const so = esc(x.dv.so || '');
+  const rate = x.dv.t ? ` · ${nf1.format(x.dv.t)} DT/h` : '';
+  if (x.src === 'ecart') return `<span class="dtag ecart" title="Devis ${so}${rate}">devis ${nf1.format(x.hd)} h · écart ${x.hm - x.hd > 0 ? '+' : ''}${nf1.format(x.hm - x.hd)}</span>`;
+  if (x.hd == null) return `<span class="dtag warn" title="Devis ${so} : ${x.dv.f === 'F' ? 'main d\u2019oeuvre au forfait, pas d\u2019heures' : 'pas de ligne main d\u2019oeuvre'}">${x.dv.f === 'F' ? 'MO au forfait' : 'pas de MO au devis'}</span>`;
+  return `<span class="dtag${x.dv.f ? ' warn' : ''}" title="Devis ${so}${rate}${x.dv.f ? ' · lignes hors taux horaire (forfait / produit)' : ''}">devis ${so.slice(-6)}${x.dv.f ? ' +autres' : ''}</span>`;
+}
+const today0 = () => { const t = new Date(); t.setHours(0, 0, 0, 0); return t; };
+
+/* ---------- working-day arithmetic ---------- */
+const isWork = d => { const w = d.getDay(); return S.params.semaine == 5 ? (w !== 0 && w !== 6) : w !== 0; };
+function nextWork(d) { const x = new Date(d); while (!isWork(x)) x.setDate(x.getDate() + 1); return x; }
+function addWorkDays(start, n) {             // start counts as day 1
+  let x = nextWork(start), c = 1;
+  while (c < n) { x.setDate(x.getDate() + 1); if (isWork(x)) c++; }
+  return x;
+}
+function workBetween(a, b) {                 // working days in (a, b]
+  let c = 0; const x = new Date(a);
+  while (x < b) { x.setDate(x.getDate() + 1); if (isWork(x)) c++; }
+  return c;
+}
+
+/* ---------- vehicle parsing ---------- */
+function parseVeh(v) {
+  const p = String(v || '').split('/').map(s => s.trim());
+  const plate = p.length > 1 ? p[p.length - 1] : '';
+  const marque = p[0] || '';
+  let modele = p.slice(1, -1).join(' / ');
+  if (modele.toUpperCase() === marque.toUpperCase()) modele = '';
+  return {marque, modele, plate};
+}
+function plateHtml(pl) {
+  if (!pl) return '';
+  const m = pl.match(/^(\d+)\s*TU\s*(\d+)$/i);
+  if (m) return `<span class="plate" title="${esc(pl)}">${m[1]} <span class="ar" lang="ar">تونس</span> ${m[2]}</span>`;
+  return `<span class="plate rs" title="Régime suspensif">${esc(pl)}</span>`;
+}
+
+/* ---------- computation ---------- */
+const phaseOf = e => /^(r[ée]paration|fin r[ée]paration)/i.test(e || '') ? 'cours' : 'avant';
+const PHASES = {cours: 'En réparation', avant: 'À commencer'};
+function etapeShort(e) {
+  if (/^fin r[ée]paration/i.test(e || '')) return 'Fin réparation';
+  return String(e || '').replace(/^R[ée]paration\s*:\s*/i, '').replace(/Pr[ée]paration à la Peinture/i, 'Prépa. peinture')
+    .replace(/ R[ée]paration$/i, '').replace(/ au Garage$/i, '').replace(/Bon de r[ée]ception du V[ée]hicule/i, 'Réception véhicule');
+}
+const etapeCls = e => /^fin r[ée]paration/i.test(e) ? 'fin' : phaseOf(e) === 'cours' ? 'rep' : /RDV/i.test(e) ? 'rdv' : 'liv';
+function compute(r) {
+  const s = S.saisies[keyOf(r.ds)] || {};
+  const dv = S.devis[r.ds] || null;
+  const hm = (s.heures === '' || s.heures == null) ? null : Number(s.heures);
+  const hd = dv && dv.h != null ? Number(dv.h) : null;
+  const h = hm != null ? hm : hd;
+  const src = hm != null ? (hd != null && Math.abs(hm - hd) > 0.01 ? 'ecart' : 'manuel') : hd != null ? 'devis' : (dv && dv.f === 'F') ? 'forfait' : 'aucune';
+  const jours = h != null && h > 0 ? Math.max(1, Math.ceil(h / S.params.hpj - 1e-9)) : null;   // arrondi au jour supérieur (1,3 j → 2 j)
+  const etape = (dv && dv.task) || r.etape || '';
+  const phase = phaseOf(etape);
+  const kd = S.debTab[r.ds] || null;            // tableau « Indicateur de performance »
+  const debutSrc = s.debut ? 'manuel' : (kd && kd.d) ? 'tableau' : (dv && dv.st) ? 'odoo' : '';
+  const debutVal = s.debut || (kd && kd.d) || (dv && dv.st) || '';
+  const debut = parseIso(debutVal);
+  let fin = null, statut, reste = null, prog = 0, n = null, done = 0;
+  const t = today0();
+  if (s.action === DONE_ACTION || /^fin r[ée]paration/i.test(etape) || (dv && dv.en)) statut = 'fini';
+  else if (h == null || !(h > 0)) statut = 'saisir';
+  else if (!debut) statut = 'attente';
+  if (jours && debut) {
+    n = jours;
+    fin = addWorkDays(debut, n);
+    const start = nextWork(debut);
+    done = t < start ? 0 : workBetween(new Date(start.getTime() - 864e5), t);
+    prog = Math.min(1, done / n);
+    if (!statut) {
+      if (t > fin) { statut = 'retard'; reste = -workBetween(fin, t); }
+      else { reste = workBetween(t, fin); statut = reste <= 1 ? 'proche' : 'cours'; }
+    }
+  }
+  if (statut === 'fini') prog = 1;
+  const v = parseVeh(r.veh);
+  return {...r, ...v, key: keyOf(r.ds), etape, phase, debutSrc, debutVal, kd, s, dv, hm, hd, src, heures: h, jours, nj: n, done, debut, fin, statut, reste, prog, action: s.action || '', note: s.note || ''};
+}
+const all = () => S.rows.map(compute);
+
+function filtered(list) {
+  const q = S.f.q.trim().toLowerCase().replace(/\s+/g, '');
+  return list.filter(x => {
+    if (S.f.etape && x.etape !== S.f.etape) return false;
+    if (S.f.phase && x.phase !== S.f.phase) return false;
+    if (S.f.statut && x.statut !== S.f.statut) return false;
+    if (S.f.garage && x.garage !== S.f.garage) return false;
+    if (S.f.src && x.src !== S.f.src && !(S.f.src === 'verif' && (x.src === 'forfait' || (x.dv && x.dv.f)))) return false;
+    if (S.f.action === '__none' ? x.action : (S.f.action && x.action !== S.f.action)) return false;
+    if (q) {
+      const hay = (x.ds + x.veh + x.garage + x.note + x.action).toLowerCase().replace(/\s+/g, '');
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+function sorted(list) {
+  const {k, d} = S.sort;
+  const val = x => {
+    switch (k) {
+      case 'statut': return STATUTS[x.statut].rank * 1e6 + (x.reste ?? 0);
+      case 'veh': return (x.marque + ' ' + x.modele).toLowerCase();
+      case 'debut': return x.debut ? x.debut.getTime() : null;
+      case 'fin': return x.fin ? x.fin.getTime() : null;
+      case 'ds': return x.ds.replace(/^DS(\d+)\/(\d+)$/, '$2$1');
+      default: return x[k];
+    }
+  };
+  return list.slice().sort((a, b) => {
+    const va = val(a), vb = val(b);
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1; if (vb == null) return -1;
+    return (va < vb ? -1 : va > vb ? 1 : 0) * d;
+  });
+}
+
+/* ---------- affichage view ---------- */
+S.view = 'suivi'; S.b = {statut: '', garage: '', q: '', phase: 'cours'};
+function statusSub(x) {
+  if (x.statut === 'retard') return `${-x.reste} jour(s) ouvré(s) de retard · fin prévue ${fdate(x.fin)}`;
+  if (x.statut === 'proche') return x.reste === 0 ? `Fin prévue aujourd'hui` : `Fin prévue demain · ${fdate(x.fin)}`;
+  if (x.statut === 'cours') return x.done > 0 ? `Jour ${Math.min(x.done, x.nj)} / ${x.nj} · fin prévue ${fdate(x.fin)}` : `Démarre le ${fdate(x.debut)} · ${x.nj} j`;
+  if (x.statut === 'attente') return `${x.jours} j de travail (${nf1.format(x.heures)} h) · date de début à fixer`;
+  if (x.statut === 'saisir') return x.dv && x.dv.f === 'F' ? 'MO au forfait : heures à saisir' : 'Heures validées à saisir';
+  if (x.statut === 'fini') return x.fin ? `Fin prévue ${fdate(x.fin)}` : 'Réparation terminée';
+  return '';
+}
+function renderBoard(all0) {
+  const b = S.b;
+  $('#bPhase').innerHTML = [['cours', 'En réparation'], ['avant', 'À commencer'], ['', 'Tous']].map(([v, l]) => `<button data-bph="${v}" aria-pressed="${b.phase === v}">${l} <b>${v ? all0.filter(x => x.phase === v).length : all0.length}</b></button>`).join('');
+  const list = b.phase ? all0.filter(x => x.phase === b.phase) : all0;
+  const order = Object.entries(STATUTS).sort((a, c) => a[1].rank - c[1].rank);
+  $('#bTiles').innerHTML = order.map(([k, o]) => `<button class="tile" data-bst="${k}" aria-pressed="${b.statut === k}" style="--c:var(${o.c})"><b>${list.filter(x => x.statut === k).length}</b><span>${o.label}</span></button>`).join('');
+  const gars = [...new Set(list.map(x => x.garage))].sort();
+  $('#bGarage').innerHTML = `<option value="">Tous les garages</option>` + gars.map(g => `<option${g === b.garage ? ' selected' : ''}>${esc(g)}</option>`).join('');
+  const qq = b.q.trim().toLowerCase().replace(/\s+/g, '');
+  const rows = list.filter(x => (!b.statut || x.statut === b.statut) && (!b.garage || x.garage === b.garage) &&
+      (!qq || (x.ds + x.veh + x.garage + x.action).toLowerCase().replace(/\s+/g, '').includes(qq)))
+    .sort((a, c) => STATUTS[a.statut].rank - STATUTS[c.statut].rank || (a.reste ?? 99) - (c.reste ?? 99) || a.ds.localeCompare(c.ds));
+  $('#bList').innerHTML = rows.map(x => {
+    const st = STATUTS[x.statut];
+    return `<article class="brow">
+      <div class="b-ds">${esc(x.ds)}<small>${esc(etapeShort(x.etape))}</small></div>
+      <div class="b-veh"><b>${esc(x.marque)}</b> <span class="mod">${esc(x.modele)}</span><br>${plateHtml(x.plate)}</div>
+      <div class="b-gar">${esc(x.garage)}</div>
+      <div class="bst" style="--c:var(${st.c});--s:var(${st.s})">
+        <div class="lab">${st.label}${x.fin && x.statut !== 'fini' ? `<small>${Math.round(x.prog * 100)} %</small>` : ''}</div>
+        <div class="sub">${statusSub(x)}</div>
+        ${progHtml(x, st)}
+      </div>
+      <div class="b-act${x.action ? '' : ' none'}">${x.action ? esc(x.action) : 'Aucune action'}${x.note ? `<small title="${esc(x.note)}">${esc(x.note)}</small>` : ''}</div>
+    </article>`;
+  }).join('') || `<div class="empty-state"><b>${S.loaded ? 'Aucun dossier' : 'Chargement…'}</b>${S.loaded ? 'Modifiez les filtres.' : ''}</div>`;
+  const now = new Date();
+  $('#bFoot').textContent = `${rows.length} / ${list.length} dossiers · actualisé à ${pad(now.getHours())}h${pad(now.getMinutes())} · mise à jour automatique`;
+}
+function setView(v) {
+  S.view = v === 'affichage' ? 'affichage' : 'suivi';
+  $('#board').hidden = S.view !== 'affichage';
+  $('#mainView').hidden = S.view === 'affichage';
+  $('#viewBtn span').textContent = S.view === 'affichage' ? 'Suivi détaillé' : 'Affichage';
+  $('#formulaBtn').hidden = S.view === 'affichage';
+  render();
+}
+window.addEventListener('hashchange', () => setView(location.hash.slice(1)));
+setInterval(() => { if (S.view === 'affichage') renderBoard(all()); }, 60000);
+
+/* ---------- render ---------- */
+function render() {
+  if (render2()) return;
+  const ae = document.activeElement;
+  if (ae && ae.closest && ae.closest('#tbody') && ae.matches('input,select')) { deferRender = true; renderSummary(); return; }
+  deferRender = false;
+  renderSummary();
+  renderTable();
+}
+function render2() {
+  if (S.view === 'affichage') { renderHeader(); renderBoard(all()); return true; }
+  return false;
+}
+function renderSummary() {
+  const list = all();
+  renderHeader(); renderKpis(list); renderGarages(list); renderStatus(list); renderFilters(list);
+}
+
+function renderHeader() {
+  $('#formulaBtn').textContent = `${nf1.format(S.params.hpj)} h = 1 j · ${S.params.semaine == 5 ? 'Lun–Ven' : 'Lun–Sam'}`;
+  const m = S.meta;
+  $('#srcInfo').textContent = !S.loaded ? 'Chargement des dossiers…' :
+    m ? `${S.rows.length} dossiers en réparation · Odoo lu le ${S.devisAt ? fdt(S.devisAt) : '—'}` : 'En attente des données Odoo';
+  $('#importBtn').hidden = !S.canWrite;
+  $('#exportBtn').hidden = !S.rows.length;
+}
+
+function renderKpis(list) {
+  const n = list.length;
+  const enc = list.filter(x => x.phase === 'cours').length;
+  const saisis = list.filter(x => x.heures > 0);
+  const H = saisis.reduce((a, x) => a + x.heures, 0);
+  const J = saisis.reduce((a, x) => a + (x.jours || 0), 0);
+  const actifs = list.filter(x => x.debut && x.statut !== 'fini' && x.statut !== 'saisir');
+  const late = list.filter(x => x.statut === 'retard');
+  const pct = n ? saisis.length / n : 0;
+  $('#kpis').innerHTML = `
+    <div class="kpi"><span class="lbl">Dossiers suivis</span><span class="val">${n}</span>
+      <span class="hint"><b>${enc}</b> en réparation · <b>${n - enc}</b> à commencer</span></div>
+    <div class="kpi"><span class="lbl">Heures validées expert</span><span class="val">${nf1.format(H)}<small>h</small></span>
+      <span class="hint">${list.filter(x => x.src === 'devis').length} devis Odoo · ${list.filter(x => x.src === 'manuel' || x.src === 'ecart').length} saisies · <b style="color:var(--warn)">${list.filter(x => x.src === 'ecart').length} écarts</b></span><div class="meter"><i style="width:${pct * 100}%"></i></div></div>
+    <div class="kpi"><span class="lbl">Jours de travail</span><span class="val">${nf1.format(J)}<small>j</small></span>
+      <span class="hint">${nf1.format(S.params.hpj)} h = 1 j, arrondi sup. · moy. ${saisis.length ? nf1.format(J / saisis.length) : '—'} j / dossier</span></div>
+    <div class="kpi"><span class="lbl">Réparations démarrées</span><span class="val">${actifs.length}</span>
+      <span class="hint">${list.filter(x => x.statut === 'attente').length} chiffrés non démarrés</span></div>
+    <div class="kpi ${late.length ? 'alert' : ''}"><span class="lbl">En retard</span><span class="val">${late.length}</span>
+      <span class="hint">${list.filter(x => x.statut === 'proche').length} à échéance ≤ 1 jour</span></div>`;
+}
+
+function renderGarages(list) {
+  const g = new Map();
+  for (const x of list) {
+    const o = g.get(x.garage) || {n: 0, j: 0, late: 0};
+    o.n++; o.j += x.jours || 0; if (x.statut === 'retard') o.late++;
+    g.set(x.garage, o);
+  }
+  const useJ = S.garMode === 'jours';
+  const arr = [...g.entries()].map(([k, o]) => ({k, ...o, v: useJ ? o.j : o.n}))
+    .sort((a, b) => b.v - a.v || b.n - a.n || a.k.localeCompare(b.k));
+  const totalJ = arr.reduce((a, x) => a + x.j, 0);
+  $('#mJ').setAttribute('aria-pressed', useJ); $('#mD').setAttribute('aria-pressed', !useJ);
+  if (useJ && totalJ === 0) {
+    $('#garBars').innerHTML = `<div class="empty-state" style="padding:22px 8px"><b>Aucune heure saisie</b>Saisissez les heures validées par l'expert dans le tableau : la charge en jours s'affichera ici.</div>`;
+    $('#garMore').hidden = true; return;
+  }
+  const vis = useJ ? arr.filter(x => x.v > 0) : arr;
+  const show = S.garAll ? vis : vis.slice(0, 9);
+  const max = Math.max(...arr.map(x => x.v), 1);
+  $('#garBars').innerHTML = show.map(x => `
+    <button class="hb" data-gar="${esc(x.k)}" aria-pressed="${S.f.garage === x.k}" title="${esc(x.k)} — ${x.n} dossier(s), ${nf1.format(x.j)} j${x.late ? ', ' + x.late + ' en retard' : ''}">
+      <span class="n">${esc(x.k)}</span>
+      <span class="t"><i style="width:${x.v / max * 100}%"></i>${x.late ? `<i class="late" style="width:${(useJ ? 0 : x.late) / max * 100}%"></i>` : ''}</span>
+      <span class="v">${useJ ? nf1.format(x.v) + ' j' : x.v}</span>
+    </button>`).join('');
+  $('#garMore').hidden = vis.length <= 9;
+  $('#garMore').textContent = S.garAll ? 'Afficher le top 9' : `Voir les ${vis.length} garages`;
+}
+
+function stackHtml(entries, total, attr, active) {
+  return entries.filter(e => e.n).map(e =>
+    `<button style="flex:${e.n};background:var(${e.c})" data-${attr}="${esc(e.k)}" title="${esc(e.l)} : ${e.n}" aria-label="${esc(e.l)} : ${e.n}"></button>`).join('');
+}
+function legendHtml(entries, attr, active) {
+  return entries.map(e => `<button class="lg" data-${attr}="${esc(e.k)}" aria-pressed="${active === e.k}"><i style="background:var(${e.c})"></i><span>${esc(e.l)}</span><b>${e.n}</b></button>`).join('');
+}
+function renderStatus(list) {
+  const st = Object.entries(STATUTS).sort((a, b) => a[1].rank - b[1].rank)
+    .map(([k, v]) => ({k, l: v.label, c: v.c, n: list.filter(x => x.statut === k).length}));
+  $('#stStack').innerHTML = stackHtml(st, list.length, 'st');
+  $('#stLegend').innerHTML = legendHtml(st, 'st', S.f.statut);
+  const ETC = {rdv: '--wait', liv: '--idle', rep: '--accent', fin: '--done'};
+  const et = [...new Set(list.map(x => x.etape))].sort((a, b) => (phaseOf(a) === 'cours') - (phaseOf(b) === 'cours') || a.localeCompare(b)).map(k => ({k, l: etapeShort(k), c: ETC[etapeCls(k)], n: list.filter(x => x.etape === k).length}));
+  $('#etStack').innerHTML = stackHtml(et, list.length, 'et');
+  $('#etLegend').innerHTML = legendHtml(et, 'et', S.f.etape);
+}
+
+function fillSelect(el, opts, cur, first) {
+  el.innerHTML = `<option value="">${first}</option>` + opts.map(o => `<option value="${esc(o.v)}"${o.v === cur ? ' selected' : ''}>${esc(o.l)}</option>`).join('');
+}
+function renderFilters(list) {
+  fillSelect($('#fEtape'), [...new Set(list.map(x => x.etape))].sort().map(v => ({v, l: v})), S.f.etape, 'Toutes les tâches');
+  fillSelect($('#fStatut'), Object.entries(STATUTS).sort((a, b) => a[1].rank - b[1].rank).map(([v, o]) => ({v, l: o.label})), S.f.statut, 'Tous les statuts');
+  fillSelect($('#fAction'), [{v: '__none', l: 'Sans action'}, ...ACTIONS.map(v => ({v, l: v}))], S.f.action, 'Toutes les actions');
+  fillSelect($('#fGarage'), [...new Set(list.map(x => x.garage))].sort().map(v => ({v, l: v})), S.f.garage, 'Tous les garages');
+  fillSelect($('#fSrc'), Object.entries(SRC).map(([v, l]) => ({v, l})), S.f.src, 'Toutes les heures');
+  const chips = [];
+  if (S.f.statut) chips.push(['statut', STATUTS[S.f.statut].label]);
+  if (S.f.etape) chips.push(['etape', S.f.etape]);
+  if (S.f.phase) chips.push(['phase', PHASES[S.f.phase]]);
+  $('#fPhase').value = S.f.phase;
+  if (S.f.action) chips.push(['action', S.f.action === '__none' ? 'Sans action' : S.f.action]);
+  if (S.f.garage) chips.push(['garage', S.f.garage]);
+  if (S.f.src) chips.push(['src', SRC[S.f.src]]);
+  if (S.f.q) chips.push(['q', '« ' + S.f.q + ' »']);
+  $('#chips').innerHTML = chips.map(([k, l]) => `<button class="chip" data-clear="${k}">${esc(l)} ✕</button>`).join('') +
+    (chips.length > 1 ? `<button class="chip" data-clear="all">Tout effacer</button>` : '');
+}
+
+function progHtml(x, st) {
+  if (!x.fin) return '';
+  const pct = Math.round(x.prog * 100);
+  const running = x.statut !== 'fini' && x.done > 0;
+  const lbl = x.statut === 'fini' ? 'Terminé' : x.done === 0 ? 'Démarre bientôt' : x.statut === 'retard' ? `J${x.nj} dépassé +${-x.reste} j` : `Jour ${Math.min(x.done, x.nj)} / ${x.nj}`;
+  return `<div class="load${running ? ' run' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="Avancement réparation ${esc(x.ds)}" style="--c:var(${st.c})">
+    <div class="load-t"><i style="width:${Math.max(pct, x.done ? 4 : 0)}%"></i></div><span class="load-l"><b>${pct} %</b> ${lbl}</span></div>`;
+}
+function rowHtml(x) {
+  const st = STATUTS[x.statut];
+  const dis = S.canWrite ? '' : ' disabled';
+  let finTxt = '—', finSub = '';
+  if (x.fin) {
+    finTxt = fdate(x.fin);
+    finSub = x.statut === 'fini' ? 'terminé' : x.reste < 0 ? `${-x.reste} j ouvré(s) de retard` : x.reste === 0 ? "aujourd'hui" : `reste ${x.reste} j ouvré(s)`;
+  } else if (x.jours && !x.debut) finSub = 'saisir la date de début';
+  return `<tr data-key="${esc(x.key)}" class="${x.statut === 'retard' ? 'late' : x.statut === 'proche' ? 'soon' : ''}">
+    <td class="ds">${esc(x.ds)}${x.n > 1 ? `<small>${x.n} lignes de commande</small>` : ''}</td>
+    <td class="veh"><b>${esc(x.marque)}</b> <span class="mod">${esc(x.modele)}</span><br>${plateHtml(x.plate)}</td>
+    <td class="gar">${esc(x.garage)}</td>
+    <td><span class="etape ${etapeCls(x.etape)}" title="${esc(x.etape)}">${esc(etapeShort(x.etape))}</span></td>
+    <td class="r hcell"><input class="in${x.heures > 0 ? '' : ' empty'}${x.src === 'devis' ? ' fromdevis' : ''}" type="number" inputmode="decimal" min="0" max="999" step="0.5" data-f="heures" id="h-${esc(x.key)}" value="${x.hm ?? ''}" placeholder="${x.hd != null ? nf1.format(x.hd) : 'h'}" aria-label="Heures validées ${esc(x.ds)}"${dis}>${devisTag(x)}</td>
+    <td class="r"><span class="jours">${x.jours ?? '—'}</span>${x.jours ? '<small>j</small>' : ''}${x.heures > 0 ? `<small class="calc">${nf1.format(x.heures)} h ÷ ${nf1.format(S.params.hpj)}</small>` : ''}</td>
+    <td><input class="in date" type="date" data-f="debut" id="d-${esc(x.key)}" value="${esc(x.debutVal)}" aria-label="Date début réparation ${esc(x.ds)}"${dis}>${x.debutSrc === 'tableau' ? `<span class="dsrc" title="${esc(x.kd.src || '')}">début tableau suivi</span>` : x.debutSrc === 'odoo' ? '<span class="dsrc">début Odoo</span>' : !x.debut && x.dv && x.dv.rdv ? `<span class="dsrc">RDV Odoo ${fdate(parseIso(x.dv.rdv))}</span>` : ''}</td>
+    <td class="fin">${finTxt}${finSub ? `<small>${finSub}</small>` : ''}</td>
+    <td><span class="pill" style="color:var(${st.c});background:var(${st.s})">${st.label}</span>
+      ${progHtml(x, st)}</td>
+    <td><select class="act" data-f="action" id="a-${esc(x.key)}" aria-label="Action ${esc(x.ds)}"${dis}>
+      <option value="">—</option>${ACTIONS.map(a => `<option${a === x.action ? ' selected' : ''}>${esc(a)}</option>`).join('')}</select></td>
+    <td><button class="notebtn${x.note ? ' has' : ''}" data-note="${esc(x.key)}" title="${x.note ? esc(x.note) : 'Ajouter un commentaire'}" aria-label="Commentaire ${esc(x.ds)}">
+      <svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg></button></td>
+  </tr>`;
+}
+
+function renderTable() {
+  $('#thead').innerHTML = COLS.map(c => c.nosort ? `<th></th>` :
+    `<th class="${c.r ? 'r ' : ''}${S.sort.k === c.k ? 'sorted' : ''}" aria-sort="${S.sort.k === c.k ? (S.sort.d > 0 ? 'ascending' : 'descending') : 'none'}"><button data-sort="${c.k}">${c.l}<span class="arr">${S.sort.k === c.k ? (S.sort.d > 0 ? '▲' : '▼') : '▲'}</span></button></th>`).join('');
+  const list = sorted(filtered(all()));
+  $('#count').textContent = `${list.length} / ${S.rows.length} dossiers`;
+  $('#tbody').innerHTML = list.map(rowHtml).join('');
+  $('#tEmpty').innerHTML = !S.loaded ? `<div class="empty-state"><b>Chargement…</b>Récupération des dossiers et des saisies.</div>` :
+    !S.rows.length ? `<div class="empty-state"><b>Aucun dossier</b>La liste arrive d'Odoo par l'agent GitHub (deux fois par jour). Lancez-le une première fois depuis l'onglet Actions du dépôt.</div>` :
+    !list.length ? `<div class="empty-state"><b>Aucun dossier ne correspond</b>Modifiez la recherche ou les filtres.</div>` : '';
+}
+
+/* ---------- saving ---------- */
+function toast(msg) {
+  const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg;
+  $('#toastRoot').replaceChildren(el); setTimeout(() => el.remove(), 2600);
+}
+async function saveSaisie(key, patch, inputEl) {
+  const row = S.rows.find(r => keyOf(r.ds) === key);
+  const prev = S.saisies[key] || {};
+  const next = {...prev, ...patch, ds: row ? row.ds : prev.ds, at: new Date().toISOString()};
+  if (Store.email) next.by = Store.email;
+  S.saisies[key] = next;
+  render();
+  if (!Store.ready) { toast('Base indisponible : saisie non enregistrée'); return; }
+  const el = () => document.getElementById(inputEl);
+  el()?.classList.add('saving');
+  const chain = (pending.get(key) || Promise.resolve()).then(async () => {
+    await Store.saveSaisie(key, next);
+  }).then(() => { const x = el(); if (x) { x.classList.remove('saving'); x.classList.add('saved-flash'); setTimeout(() => x.classList.remove('saved-flash'), 900); } })
+    .catch(e => {
+      el()?.classList.remove('saving');
+      if (e && e.code === 'permission-denied') { S.canWrite = false; render(); toast("Vous n'avez pas le droit de modifier ce tableau"); }
+      else toast("Échec de l'enregistrement — réessayez");
+    });
+  pending.set(key, chain);
+}
+
+/* ---------- modals ---------- */
+function openModal(html, onMount) {
+  const root = $('#modalRoot');
+  root.innerHTML = `<div class="modal-bg" id="mbg"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`;
+  const close = () => { root.innerHTML = ''; if (deferRender) render(); };
+  $('#mbg').addEventListener('click', e => { if (e.target.id === 'mbg' || e.target.closest('[data-close]')) close(); });
+  document.addEventListener('keydown', function k(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', k); } });
+  onMount && onMount(close);
+  root.querySelector('input,textarea,select,button.primary')?.focus();
+}
+
+async function openNote(key) {
+  const x = all().find(r => r.key === key); if (!x) return;
+  let who = '';
+  if (x.s.at) {
+    let name = '';
+    name = x.s.by || '';
+    const d = new Date(x.s.at);
+    who = `Dernière modification ${name ? 'par ' + esc(name) + ' ' : ''}le ${fdate(d)} à ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  openModal(`
+    <h3>${esc(x.ds)}</h3>
+    <div class="meta">${esc(x.marque)} ${esc(x.modele)} · ${esc(x.plate)} · ${esc(x.garage)}${who ? '<br>' + who : ''}</div>
+    <div class="field"><label for="mNote">Commentaire / suivi de l'action</label>
+      <textarea id="mNote" placeholder="Ex. garage relancé le 28/10, pièces livrées, véhicule entré en atelier…"${S.canWrite ? '' : ' disabled'}>${esc(x.note)}</textarea></div>
+    <div class="mfoot"><button class="btn" data-close>Annuler</button>${S.canWrite ? '<button class="btn primary" id="mSave">Enregistrer</button>' : ''}</div>`,
+    close => {
+      $('#mSave')?.addEventListener('click', () => { saveSaisie(key, {note: $('#mNote').value.trim()}, 'h-' + key); close(); toast('Commentaire enregistré'); });
+    });
+}
+
+function openParams() {
+  const p = S.params;
+  openModal(`
+    <h3>Formule de conversion</h3>
+    <div class="meta">Convertit les heures validées par l'expert en jours de travail, puis calcule la date de fin prévue à partir de la date de début.</div>
+    <div class="formula-box">jours de travail = heures validées ÷ <b id="fHpj">${nf1.format(p.hpj)}</b>, arrondi au jour supérieur (ex. 1,3 j → 2 j)<br>fin prévue = début + jours ouvrés (le jour de début compte)</div>
+    <div class="field"><label for="pHpj">Heures par jour de travail</label><input id="pHpj" type="number" min="1" max="24" step="0.5" value="${p.hpj}"></div>
+    <div class="field"><label for="pSem">Jours ouvrés de l'atelier</label>
+      <select id="pSem"><option value="6"${p.semaine != 5 ? ' selected' : ''}>Lundi → samedi (dimanche chômé)</option><option value="5"${p.semaine == 5 ? ' selected' : ''}>Lundi → vendredi</option></select></div>
+    <div class="mfoot"><button class="btn" data-close>Annuler</button>${S.canWrite ? '<button class="btn primary" id="pSave">Appliquer</button>' : ''}</div>`,
+    close => {
+      $('#pHpj').addEventListener('input', e => { const v = Number(e.target.value); if (v > 0) $('#fHpj').textContent = nf1.format(v); });
+      $('#pSave')?.addEventListener('click', async () => {
+        const hpj = Number($('#pHpj').value); const semaine = Number($('#pSem').value);
+        if (!(hpj > 0 && hpj <= 24)) { $('#pHpj').focus(); toast('Entrez un nombre d’heures entre 1 et 24'); return; }
+        S.params = {hpj, semaine}; close(); render();
+        try { await Store.saveDoc('params', {hpj, semaine, at: new Date().toISOString()}); toast('Formule appliquée'); } catch (e) { toast("Échec de l'enregistrement de la formule"); }
+      });
+    });
+}
+
+/* ---------- import du tableau « Indicateur de performance » (dates de début) ---------- */
+function parseDebuts(buf) {
+  const wb = XLSX.read(buf, {type: 'array', cellDates: true});
+  const dsSet = new Set(S.rows.map(r => r.ds));
+  const plateOf = {}; S.rows.forEach(r => { plateOf[String(parseVeh(r.veh).plate).replace(/\s+/g, '').toUpperCase()] = r.ds; });
+  const hits = {};
+  let lus = 0;
+  for (const name of wb.SheetNames) {
+    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], {header: 1, defval: null});
+    const hi = aoa.findIndex(r => r && normH(r[0]) === 'numero dossier');
+    if (hi < 0) continue;
+    for (const r of aoa.slice(hi + 1)) {
+      if (!r || !r[0]) continue; lus++;
+      const num = String(r[0]), yr = (num.match(/\/(\d{4})/) || [])[1];
+      let m = yr ? (num.match(/\d{3,4}/g) || []).map(n => 'DS' + n.padStart(4, '0') + '/' + yr).filter(d => dsSet.has(d)) : [];
+      let by = 'ds';
+      const pl = String(r[2] || '').replace(/\s+/g, '').toUpperCase();
+      if (!m.length && plateOf[pl]) { m = [plateOf[pl]]; by = 'plaque'; }
+      const d = r[5] instanceof Date ? iso(new Date(r[5].getFullYear(), r[5].getMonth(), r[5].getDate() + (r[5].getHours() >= 12 ? 1 : 0))) : null;
+      for (const ds of m) (hits[ds] = hits[ds] || []).push({d, sit: r[6] ? String(r[6]) : '', by, src: name + ' ' + num, h: typeof r[3] === 'number' ? r[3] : null});
+    }
+  }
+  const rows = {};
+  for (const [ds, v] of Object.entries(hits)) {
+    const enc = v.filter(x => x.d && /cours de r/i.test(x.sit)), dsm = v.filter(x => x.d && x.by === 'ds');
+    const pool = enc.length ? enc : dsm; if (!pool.length) continue;
+    const p = pool.reduce((a, b) => (b.d > a.d ? b : a));
+    rows[ds] = {d: p.d, sit: p.sit, h: p.h, src: p.src};
+  }
+  return {rows, lus};
+}
+async function handleFile(file) {
+  let res;
+  try { res = parseDebuts(new Uint8Array(await file.arrayBuffer())); }
+  catch (e) { toast('Fichier illisible'); return; }
+  const n = Object.keys(res.rows).length;
+  if (!res.lus) { toast('Aucune feuille avec la colonne « Numéro dossier » dans ce fichier'); return; }
+  openModal(`
+    <h3>Dates de début : ${esc(file.name)}</h3>
+    <div class="meta">${res.lus} lignes lues. La date « Rendez vous » devient la date de début de réparation (priorité : saisie manuelle, puis ce tableau, puis Odoo).</div>
+    <div class="formula-box">${n} dossier(s) en réparation trouvé(s) dans le tableau<br>${S.rows.length - n} dossier(s) gardent la date Odoo</div>
+    <div class="mfoot"><button class="btn" data-close>Annuler</button><button class="btn primary" id="iOk">Appliquer les dates</button></div>`,
+    close => $('#iOk').addEventListener('click', async () => {
+      S.debTab = res.rows; close(); render();
+      try { await Store.saveDoc('debuts', {at: new Date().toISOString(), source: file.name, rows: res.rows}); toast('Dates de début mises à jour'); }
+      catch (e) { toast("Échec de l'enregistrement des dates"); }
+    }));
+}
+function normH(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim(); }
+
+/* ---------- Excel export ---------- */
+async function exportView() {
+  const list = sorted(filtered(all()));
+  const data = list.map(x => ({
+    'Dossier Sinistre': x.ds, 'Marque': x.marque, 'Modèle': x.modele, 'Immatriculation': x.plate, 'Garage': x.garage,
+    'Phase': PHASES[x.phase], 'Tâche courante': x.etape, 'Heures retenues': x.heures ?? '', 'Heures devis Odoo': x.hd ?? '', 'Heures saisies': x.hm ?? '',
+    'Source heures': SRC[x.src] || '', 'Devis Odoo': x.dv ? x.dv.so : '', 'Taux horaire devis': x.dv && x.dv.t ? x.dv.t : '', 'Jours de travail': x.jours ?? '',
+    'Début réparation': x.debut ? fdate(x.debut) : '', 'Source début': {manuel: 'Saisie', tableau: 'Tableau suivi', odoo: 'Odoo'}[x.debutSrc] || '', 'Fin prévue': x.fin ? fdate(x.fin) : '', 'Statut': STATUTS[x.statut].label,
+    'Jours ouvrés restants': x.reste ?? '', 'Action': x.action, 'Commentaire': x.note,
+  }));
+  const ws = XLSX.utils.json_to_sheet(data);
+  ws['!cols'] = [14, 12, 14, 14, 30, 16, 22, 10, 10, 10, 18, 16, 10, 10, 12, 12, 16, 10, 20, 40].map(w => ({wch: w}));
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Suivi réparation');
+  const out = XLSX.write(wb, {bookType: 'xlsx', type: 'array'});
+  if (!S.downloads) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([out], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+    a.download = `suivi_reparation_${iso(new Date())}.xlsx`; document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); return;
+  }
+  try {
+    await S.downloads.save({filename: `suivi_reparation_${iso(new Date())}.xlsx`, data: new Blob([out], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})});
+  } catch (e) { if (e?.code !== 'cancelled' && e?.code !== 'declined') toast("L'export n'a pas pu être enregistré"); }
+}
+
+/* ---------- events ---------- */
+$('#q').addEventListener('input', e => { S.f.q = e.target.value; renderTable(); renderFilters(all()); });
+for (const [id, k] of [['#fPhase', 'phase'], ['#fEtape', 'etape'], ['#fStatut', 'statut'], ['#fAction', 'action'], ['#fGarage', 'garage'], ['#fSrc', 'src']])
+  $(id).addEventListener('change', e => { S.f[k] = e.target.value; render(); });
+$('#chips').addEventListener('click', e => {
+  const b = e.target.closest('[data-clear]'); if (!b) return;
+  const k = b.dataset.clear;
+  if (k === 'all') { S.f = {q: '', etape: '', statut: '', action: '', garage: '', src: '', phase: ''}; $('#q').value = ''; }
+  else { S.f[k] = ''; if (k === 'q') $('#q').value = ''; }
+  render();
+});
+$('#thead').addEventListener('click', e => {
+  const b = e.target.closest('[data-sort]'); if (!b) return;
+  const k = b.dataset.sort;
+  S.sort = S.sort.k === k ? {k, d: -S.sort.d} : {k, d: ['mt', 'heures', 'jours'].includes(k) ? -1 : 1};
+  renderTable();
+});
+document.addEventListener('click', e => {
+  const g = e.target.closest('[data-gar]'); if (g) { S.f.garage = S.f.garage === g.dataset.gar ? '' : g.dataset.gar; render(); return; }
+  const s = e.target.closest('[data-st]'); if (s) { S.f.statut = S.f.statut === s.dataset.st ? '' : s.dataset.st; render(); return; }
+  const t = e.target.closest('[data-et]'); if (t) { S.f.etape = S.f.etape === t.dataset.et ? '' : t.dataset.et; render(); return; }
+  const n = e.target.closest('[data-note]'); if (n) { openNote(n.dataset.note); }
+});
+$('#tbody').addEventListener('change', e => {
+  const el = e.target; const tr = el.closest('tr'); if (!tr || !el.dataset.f) return;
+  const key = tr.dataset.key, f = el.dataset.f;
+  let v = el.value;
+  if (f === 'heures') {
+    if (v === '') v = null;
+    else { v = Number(v); if (!(v >= 0 && v <= 999)) { toast('Heures : entrez un nombre entre 0 et 999'); el.value = S.saisies[key]?.heures ?? ''; return; } v = Math.round(v * 100) / 100; }
+  }
+  if (f === 'debut' && v && !parseIso(v)) { toast('Date invalide'); return; }
+  saveSaisie(key, {[f]: v}, el.id);
+});
+$('#tbody').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.matches('input')) {   // Enter → next row same column
+    e.preventDefault();
+    const td = e.target.closest('td'), tr = td.parentElement, i = [...tr.children].indexOf(td);
+    e.target.blur();
+    requestAnimationFrame(() => {
+      const nextTr = document.querySelector(`#tbody tr[data-key="${CSS.escape(tr.dataset.key)}"]`)?.nextElementSibling;
+      nextTr?.children[i]?.querySelector('input')?.focus();
+    });
+  }
+});
+$('#tbody').addEventListener('focusout', () => { setTimeout(() => { const a = document.activeElement; if (deferRender && !(a && a.closest && a.closest('#tbody') && a.matches('input,select'))) render(); }, 0); });
+$('#mJ').addEventListener('click', () => { S.garMode = 'jours'; renderGarages(all()); });
+$('#mD').addEventListener('click', () => { S.garMode = 'dossiers'; renderGarages(all()); });
+$('#garMore').addEventListener('click', () => { S.garAll = !S.garAll; renderGarages(all()); });
+$('#formulaBtn').addEventListener('click', openParams);
+$('#viewBtn').addEventListener('click', () => { const v = S.view === 'affichage' ? 'suivi' : 'affichage'; try { location.hash = v === 'affichage' ? 'affichage' : ''; } catch (e) {} setView(v); });
+$('#bPhase').addEventListener('click', e => { const t = e.target.closest('[data-bph]'); if (!t) return; S.b.phase = t.dataset.bph; S.b.statut = ''; renderBoard(all()); });
+$('#bTiles').addEventListener('click', e => { const t = e.target.closest('[data-bst]'); if (!t) return; S.b.statut = S.b.statut === t.dataset.bst ? '' : t.dataset.bst; renderBoard(all()); });
+$('#bGarage').addEventListener('change', e => { S.b.garage = e.target.value; renderBoard(all()); });
+$('#bq').addEventListener('input', e => { S.b.q = e.target.value; renderBoard(all()); });
+$('#fsBtn').addEventListener('click', () => { const el = document.documentElement; (document.fullscreenElement ? document.exitFullscreen() : el.requestFullscreen?.())?.catch?.(() => {}); });
+$('#importBtn').addEventListener('click', () => $('#fileIn').click());
+$('#fileIn').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) handleFile(f); });
+$('#exportBtn').addEventListener('click', exportView);
+
+/* ---------- stockage Firebase ---------- */
+const Store = {
+  ready: false, email: '', db: null, ref: null,
+  async init() {
+    const cfg = window.FIREBASE_CONFIG;
+    if (!cfg || !cfg.apiKey) { setupMessage(); return; }
+    firebase.initializeApp(cfg);
+    this.db = firebase.firestore();
+    this.ref = n => this.db.collection('suiviReparation').doc(n);
+    firebase.auth().onAuthStateChanged(u => {
+      if (!u) { S.loaded = true; render(); loginForm(); return; }
+      this.email = u.email || ''; $('#who').textContent = this.email; $('#logout').hidden = false;
+      this.subscribe();
+    });
+  },
+  subscribe() {
+    let got = 0; const ready = () => { if (++got >= 2) S.loaded = true; render(); };
+    const fail = what => e => { console.error(what, e); toast(e && e.code === 'permission-denied' ? 'Accès refusé : compte non autorisé' : what + ' indisponible'); };
+    this.ref('odoo').onSnapshot(sn => {
+      const d = sn.exists ? sn.data() : null;
+      const rows = d && Array.isArray(d.rows) ? d.rows : [];
+      S.rows = rows.map(r => ({ds: r.ds, veh: r.veh, garage: r.garage, etape: r.task, n: 1}));
+      S.devis = {}; rows.forEach(r => { S.devis[r.ds] = r; });
+      S.devisAt = d ? d.at : null; S.meta = d ? {source: 'Odoo', importedAt: (d.at || '').slice(0, 10)} : null;
+      this.ready = true; ready();
+    }, fail('Liste Odoo'));
+    this.ref('saisies').onSnapshot(sn => { S.saisies = (sn.exists && sn.data().s) || {}; ready(); }, fail('Saisies'));
+    this.ref('debuts').onSnapshot(sn => { S.debTab = (sn.exists && sn.data().rows) || {}; render(); }, () => {});
+    this.ref('params').onSnapshot(sn => {
+      if (sn.exists) { const p = sn.data(); S.params = {hpj: Number(p.hpj) > 0 ? Number(p.hpj) : 6, semaine: p.semaine == 5 ? 5 : 6}; render(); }
+    }, () => {});
+  },
+  saveSaisie(key, obj) { return this.ref('saisies').set({s: {[key]: obj}}, {merge: true}); },
+  saveDoc(name, data) { if (!this.db) return Promise.reject(new Error('hors ligne')); return this.ref(name).set(data); },
+};
+function setupMessage() {
+  S.loaded = true;
+  $('#banner').innerHTML = `<div class="banner">Configuration manquante : renseignez votre projet Firebase dans le fichier <b>config.js</b> (voir README, étape 2).</div>`;
+  render();
+}
+function loginForm() {
+  openModal(`
+    <h3>Connexion</h3>
+    <div class="meta">Suivi réparation AUTOP : connectez-vous avec le compte créé dans Firebase.</div>
+    <form id="lf">
+      <div class="field"><label for="lEmail">E-mail</label><input id="lEmail" type="email" autocomplete="username" required></div>
+      <div class="field"><label for="lPass">Mot de passe</label><input id="lPass" type="password" autocomplete="current-password" required></div>
+      <div class="mfoot"><button class="btn primary" type="submit" id="lGo">Se connecter</button></div>
+    </form>`, close => {
+      $('#mbg').id = 'mbgLogin';   // la connexion ne se ferme pas d'un clic à côté
+      $('#lf').addEventListener('submit', async e => {
+        e.preventDefault(); $('#lGo').disabled = true;
+        try { await firebase.auth().signInWithEmailAndPassword($('#lEmail').value.trim(), $('#lPass').value); close(); }
+        catch (err) { $('#lGo').disabled = false; toast('E-mail ou mot de passe incorrect'); }
+      });
+    });
+}
+$('#logout').addEventListener('click', () => firebase.auth().signOut().then(() => location.reload()));
+if (location.hash === '#affichage') setView('affichage'); else render();
+Store.init();
+})();
+</script>
+
+</body>
+</html>
